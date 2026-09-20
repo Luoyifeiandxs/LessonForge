@@ -63,7 +63,7 @@
 |------|------|------|
 | LLM | LangChain + langchain-openai | OpenAI 兼容 base_url，可配 DeepSeek/Kimi/OpenAI；结构化输出用 Pydantic + `with_structured_output` |
 | PDF 摄取 | PyMuPDFParser（默认轻量）/ MinerUParser（质量优先） | 见 §5.1 |
-| 切分/检索 | LangChain RecursiveCharacterTextSplitter + Chroma（本地持久化） | embedding 走同一 OpenAI 兼容 API |
+| 切分/检索 | LangChain RecursiveCharacterTextSplitter + Chroma（本地持久化） | embedding 为独立 OpenAI 兼容端点（DeepSeek 不提供 embedding；默认 OpenAI 或本地服务，`LF_EMB_*` 环境变量，未配则跳过检索增强） |
 | 幻灯片 | Marp（markdown→PNG，自定义 CSS 主题） | `marp slides.md --images png --allow-local-files`；LLM 写 markdown 比裸 HTML 可靠 |
 | pptx 转换 | LibreOffice headless → PDF → PyMuPDF 渲染 PNG；python-pptx 抽文本 | 全现成组件 |
 | TTS | edge-tts（WordBoundary 字级事件） | 外套 TTSProvider 抽象 |
@@ -85,12 +85,14 @@ projects/<项目id>/
 ├── deck/
 │   ├── outline.json        # 大纲（人工确认后的版本）
 │   ├── slides.md           # Marp 全稿（幻灯片主产物）
+│   ├── parts/              # slide-01.md ... 逐页 Marp 片段（单页重生成的单元）
 │   ├── theme.css           # 自制主题（2~3 个版式：标题页/要点页/图文页）
 │   └── png/                # slide-01.png ...
 ├── scripts/                # scripts/slide-01.md 逐页讲稿（校对以这里为准）
 ├── audio/
-│   ├── slide-01.mp3        # 逐页配音（文件名含 hash）
-│   └── cache/              # hash(讲稿+音色) → mp3 的 TTS 缓存
+│   ├── slide-01.mp3        # 逐页配音（稳定文件名，重配音直接覆盖）
+│   ├── slide-01.json       # sidecar：{duration, word_boundaries[]}，字幕对齐唯一来源
+│   └── cache/              # hash(讲稿+音色) → mp3/json 的 TTS 缓存
 ├── timeline.json           # 渲染唯一输入：每页图片/音频/时长/字幕cue + 预留槽位
 └── output/
     ├── final.mp4
@@ -165,7 +167,7 @@ MaterialParser（接口）→ {章节列表: [{标题, markdown 文本, 图片�
 
 1. **大纲链**：材料章节（+可选教案原文）→ `{slides: [{title, points, figure_hint, teaching_goal}]}` → **人工确认关卡**（工作台内可编辑大纲文本，确认后写盘 `outline.json`；确认前不生成任何幻灯片/讲稿）。页数在此定死。
 2. **逐页幻灯片链**：按大纲逐页生成 Marp markdown；上下文 = 大纲该项 + 前 2 页标题 + 该页检索到的源材料块（含 `figure_hint` 指向的插图路径）→ 追加拼入 `slides.md`（页间 `---` 分隔）→ marp 出 PNG。
-3. **逐页讲稿链**：逐页生成口语化讲稿 150~300 字（对应 40~70s 音频），同样带检索上下文 → 写 `scripts/slide-0N.md`。
+3. **逐页讲稿链**：逐页生成口语化讲稿 150~300 字（对应 40~70s 音频），同样带检索上下文 → 写 `scripts/slide-0N.md`。约束：数字一律写中文汉字（如「一百二十」），避免 TTS 误读——该约束写入幻灯链与讲稿链两者的 system prompt。
 
 三链均为"读产物→写产物"的纯函数：不碰 HTTP、不碰全局状态（LangGraph 升级的前提纪律，见 §11）。
 
@@ -288,4 +290,4 @@ class TTSProvider(Protocol):
 | LibreOffice | pptx→PDF | 官网安装，doctor 检查路径 |
 | MinerU（可选） | 质量摄取 | `pip install mineru`（本地 GPU）或走 mineru.net API，免装 |
 
-LLM/Embedding：任一 OpenAI 兼容端点（默认 DeepSeek，配置可换 Kimi/OpenAI）。
+LLM：任一 OpenAI 兼容端点（默认 DeepSeek，配置可换 Kimi/OpenAI）；Embedding：独立 OpenAI 兼容端点（默认 OpenAI，可接本地服务；未配置则跳过检索增强）。
